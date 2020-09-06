@@ -2,16 +2,17 @@ mod constants;
 mod ds;
 mod process;
 
+use std::fs::File;
+use std::io::BufRead;
+use std::io::{self, prelude::*, BufReader};
+
+use chrono::DateTime;
+
 use colored::*;
 use constants::Message;
 use ds::{key_node::KeyNode, mismatch::Mismatch};
-use serde_json;
-use std::{
-    fmt, fs,
-    io::{self, Write},
-    process as proc,
-    str::FromStr,
-};
+use serde_json::{self, Value};
+use std::{fmt, process as proc, str::FromStr};
 use structopt::StructOpt;
 
 const HELP: &str = r#"
@@ -66,21 +67,56 @@ fn error_exit(message: constants::Message) -> ! {
 fn main() {
     let args = Cli::from_args();
 
-    let (data1, data2) = match args.read_mode {
-        InputReadMode::D => (args.source1, args.source2),
-        InputReadMode::F => {
-            if let Ok(d1) = fs::read_to_string(args.source1) {
-                if let Ok(d2) = fs::read_to_string(args.source2) {
-                    (d1, d2)
-                } else {
-                    error_exit(Message::SOURCE2);
+    let file1 = File::open(args.source1).unwrap();
+    let mut r1 = BufReader::new(file1);
+    let file2 = File::open(args.source2).unwrap();
+    let mut r2 = BufReader::new(file2);
+    let mut buffera = String::new();
+    let mut bufferb = String::new();
+
+    loop {
+        if buffera.is_empty() {
+            r1.read_line(&mut buffera).unwrap();
+        }
+        if bufferb.is_empty() {
+            r2.read_line(&mut bufferb).unwrap();
+        }
+
+        if buffera.is_empty() || bufferb.is_empty() {
+            break;
+        }
+        let compare_result = compare_jsons(&buffera, &bufferb);
+        match compare_result {
+            Mismatch {
+                date_differ: Some(date),
+                ..
+            } => {
+                if date {
+                    print!("===\n{} : {}", "Missing event".red().bold(), &buffera);
+                    buffera.clear();
+                } else if !date {
+                    print!("===\n{} : {}", "New event".red().bold(), &buffera);
+                    bufferb.clear();
                 }
-            } else {
-                error_exit(Message::SOURCE1);
+            }
+            _ => {
+                let no_mismatch = Mismatch {
+                    left_only_keys: KeyNode::Nil,
+                    right_only_keys: KeyNode::Nil,
+                    keys_in_both: KeyNode::Nil,
+                    date_differ: None,
+                };
+                if compare_result != no_mismatch {
+                    println!("===\n{}", "Event modified :".red().bold());
+                    print!("{} {}", "Before :".blue(), &buffera);
+                    print!("{} {}", "After :".blue(), &bufferb);
+                    display_output(compare_result);
+                }
+                buffera.clear();
+                bufferb.clear();
             }
         }
-    };
-    display_output(compare_jsons(&data1, &data2));
+    }
 }
 
 fn display_output(result: Mismatch) {
@@ -88,12 +124,13 @@ fn display_output(result: Mismatch) {
         left_only_keys: KeyNode::Nil,
         right_only_keys: KeyNode::Nil,
         keys_in_both: KeyNode::Nil,
+        date_differ: None,
     };
 
     let stdout = io::stdout();
     let mut handle = io::BufWriter::new(stdout.lock());
     if no_mismatch == result {
-        writeln!(handle, "\n{}", Message::NoMismatch).unwrap();
+        //writeln!(handle, "\n{}", Message::NoMismatch).unwrap();
     } else {
         match result.keys_in_both {
             KeyNode::Node(_) => {
@@ -135,9 +172,22 @@ fn display_output(result: Mismatch) {
 }
 
 fn compare_jsons(a: &str, b: &str) -> Mismatch {
-    if let Ok(value1) = serde_json::from_str(a) {
-        if let Ok(value2) = serde_json::from_str(b) {
-            process::match_json(&value1, &value2)
+    if let Ok(value1) = serde_json::from_str::<Value>(a) {
+        if let Ok(value2) = serde_json::from_str::<Value>(b) {
+            let d1 = DateTime::parse_from_rfc3339(value1["timestamp"].as_str().expect("KO"))
+                .expect("KO");
+            let d2 = DateTime::parse_from_rfc3339(value2["timestamp"].as_str().expect("KO"))
+                .expect("KO");
+            if d1 == d2 {
+                process::match_json(&value1, &value2)
+            } else {
+                Mismatch {
+                    left_only_keys: KeyNode::Nil,
+                    right_only_keys: KeyNode::Nil,
+                    keys_in_both: KeyNode::Nil,
+                    date_differ: Some(d1 < d2),
+                }
+            }
         } else {
             error_exit(Message::JSON2);
         }
@@ -221,7 +271,7 @@ mod tests {
                 }
             )
         });
-        let expected = Mismatch::new(expected_left, expected_right, expected_uneq);
+        let expected = Mismatch::new(expected_left, expected_right, expected_uneq, None);
 
         let mismatch = compare_jsons(data1, data2);
         assert_eq!(mismatch, expected, "Diff was incorrect.");
@@ -260,7 +310,7 @@ mod tests {
 
         assert_eq!(
             compare_jsons(data1, data2),
-            Mismatch::new(KeyNode::Nil, KeyNode::Nil, KeyNode::Nil)
+            Mismatch::new(KeyNode::Nil, KeyNode::Nil, KeyNode::Nil, None)
         );
     }
 
@@ -271,7 +321,7 @@ mod tests {
 
         assert_eq!(
             compare_jsons(data1, data2),
-            Mismatch::new(KeyNode::Nil, KeyNode::Nil, KeyNode::Nil)
+            Mismatch::new(KeyNode::Nil, KeyNode::Nil, KeyNode::Nil, None)
         );
     }
 }

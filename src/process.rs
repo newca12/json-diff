@@ -20,22 +20,24 @@ pub fn match_json(value1: &Value, value2: &Value) -> Mismatch {
                         left_only_keys: l,
                         right_only_keys: r,
                         keys_in_both: u,
+                        date_differ: d,
                     } = match_json(&a.get(&key).unwrap(), &b.get(&key).unwrap());
                     left_only_keys = insert_child_key_map(left_only_keys, l, &key);
                     right_only_keys = insert_child_key_map(right_only_keys, r, &key);
                     unequal_keys = insert_child_key_map(unequal_keys, u, &key);
                 }
             }
-            Mismatch::new(left_only_keys, right_only_keys, unequal_keys)
+            Mismatch::new(left_only_keys, right_only_keys, unequal_keys, None)
         }
         (a, b) => {
             if a == b {
-                Mismatch::new(KeyNode::Nil, KeyNode::Nil, KeyNode::Nil)
+                Mismatch::new(KeyNode::Nil, KeyNode::Nil, KeyNode::Nil, None)
             } else {
                 Mismatch::new(
                     KeyNode::Nil,
                     KeyNode::Nil,
                     KeyNode::Value(a.clone(), b.clone()),
+                    None,
                 )
             }
         }
