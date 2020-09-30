@@ -95,7 +95,7 @@ fn main() {
                     print!("===\n{} : {}", "Missing event".red().bold(), &buffera);
                     buffera.clear();
                 } else if !date {
-                    print!("===\n{} : {}", "New event".red().bold(), &buffera);
+                    print!("===\n{} : {}", "New event".red().bold(), &bufferb);
                     bufferb.clear();
                 }
             }
